@@ -1,0 +1,9 @@
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/Experimental.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/Nightly.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/Continuous.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/NightlyMemoryCheck.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/FaceRec.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/PACKAGE.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/RUN_TESTS.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Maureen/Downloads/FaceRecognition/build/CMakeFiles/ZERO_CHECK.dir
