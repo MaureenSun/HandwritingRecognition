@@ -1,0 +1,110 @@
+#!/bin/bash
+set -e
+
+# Test whether one version ($1) is less than or equal to other ($2).
+function version_gt {
+    test "`printf '%s\n' "$@" | sort -V | head -n 1`" != "$1"
+}
+
+# configure environmental variables
+export CC_OPT_FLAGS=${CC_OPT_FLAGS:-"-march=haswell"}
+export TF_NEED_GCP=${TF_NEED_GCP:-0}
+export TF_NEED_HDFS=${TF_NEED_HDFS:-0}
+export TF_NEED_OPENCL=${TF_NEED_OPENCL:-0}
+export TF_NEED_TENSORRT=${TF_NEED_TENSORRT:-0}
+export TF_NEED_NGRAPH=${TF_NEED_NGRAPH:-0}
+export TF_NEED_JEMALLOC=${TF_NEED_JEMALLOC:-1}
+export TF_NEED_VERBS=${TF_NEED_VERBS:-0}
+export TF_NEED_MKL=${TF_NEED_MKL:-1}
+export TF_DOWNLOAD_MKL=${TF_DOWNLOAD_MKL:-1}
+export TF_NEED_MPI=${TF_NEED_MPI:-0}
+export TF_NEED_AWS=${TF_NEED_AWS:-0}
+export TF_NEED_GDR=${TF_NEED_GDR:-0}
+export TF_CUDA_CLANG=${TF_CUDA_CLANG:-0}
+export TF_SET_ANDROID_WORKSPACE=${TF_SET_ANDROID_WORKSPACE:-0}
+export TF_NEED_KAFKA=${TF_NEED_KAFKA:-0}
+export TF_DOWNLOAD_CLANG=${TF_DOWNLOAD_CLANG:-0}
+export TF_NEED_IGNITE=${TF_NEED_IGNITE:-0}
+export TF_NEED_ROCM=${TF_NEED_ROCM:-0}
+export NCCL_INSTALL_PATH=${NCCL_INSTALL_PATH:-/usr}
+export PYTHON_BIN_PATH=${PYTHON_BIN_PATH:-"$(which python3)"}
+export PYTHON_LIB_PATH="$($PYTHON_BIN_PATH -c 'import site; print(site.getsitepackages()[0])')"
+
+# check if cuda support requested and supported
+cuda_available=false
+if hash nvcc 2>/dev/null; then
+   cuda_available=true
+fi
+
+cuda_allowed=false
+if [ "@ALLOW_CUDA@" = "ON" ]; then
+    cuda_allowed=true
+fi
+
+if [ "@REQUIRE_CUDA@" = "ON" ];  then
+    cuda_allowed=true
+    if [ "$cuda_available" != true ]; then
+        echo "CUDA support is required but not available in the system (nvcc not found)"
+        exit 1
+    fi
+fi
+
+if [ "$cuda_allowed" == true ] && [ "$cuda_available" == true ]; then
+    echo "CUDA support enabled"
+    cuda_config_opts="--config=cuda"
+    export TF_NEED_CUDA=1
+    # Capabilities are taken from Archlinux tensorflow build.
+    # https://github.com/tensorflow/tensorflow/blob/1ba2eb7b313c0c5001ee1683a3ec4fbae01105fd/third_party/gpus/cuda_configure.bzl#L411-L446
+    # according to the above, we should be specifying CUDA compute capabilities as 'sm_XX' or 'compute_XX' from now on
+    # add latest PTX for future compatibility
+    export TF_CUDA_COMPUTE_CAPABILITIES=${TF_CUDA_COMPUTE_CAPABILITIES:-"sm_52,sm_53,sm_60,sm_61,sm_62,sm_70,sm_72,sm_75,sm_80,sm_86,compute_86"}
+    export TF_CUDA_VERSION="$(nvcc --version | sed -n 's/^.*release \(.*\),.*/\1/p')"
+    export TF_CUDA_PATHS=${TF_CUDA_PATHS:-"/opt/cuda-${TF_CUDA_VERSION},/opt/cuda,/usr/local/cuda-${TF_CUDA_VERSION},/usr/local/cuda,/usr/local,/usr/cuda-${TF_CUDA_VERSION},/usr/cuda,/usr"}
+    export TF_NCCL_VERSION="$(find /opt /usr -name 'libnccl.so.*' -path '*/cuda*' | tail -n1 | sed -r 's/^.*\.so\.//')"
+    export TF_CUDNN_VERSION="$(find /opt /usr -name 'libcudnn.so.*' -path '*/cuda*' | tail -n1 | sed -r 's/^.*\.so\.//')"
+
+    # choose the right version of CUDA compiler
+    if [ -z "${GCC_HOST_COMPILER_PATH}" ]; then
+        if hash gcc-11 2>/dev/null && version_gt 11.4 `gcc-11 -dumpversion`; then
+            export GCC_HOST_COMPILER_PATH=${GCC_HOST_COMPILER_PATH:-`which gcc-11`}
+        elif hash gcc-10 2>/dev/null && version_gt 10.3 `gcc-10 -dumpversion`; then
+            export GCC_HOST_COMPILER_PATH=${GCC_HOST_COMPILER_PATH:-`which gcc-10`}
+        elif hash gcc-9 2>/dev/null && version_gt 9.4 `gcc-9 -dumpversion`; then
+            export GCC_HOST_COMPILER_PATH=${GCC_HOST_COMPILER_PATH:-`which gcc-9`}
+        elif hash gcc-8 2>/dev/null && version_gt 8.5 `gcc-8 -dumpversion`; then
+            export GCC_HOST_COMPILER_PATH=${GCC_HOST_COMPILER_PATH:-`which gcc-8`}
+        else
+            export GCC_HOST_COMPILER_PATH=${GCC_HOST_COMPILER_PATH:-`which gcc`}
+        fi
+    fi
+
+    export CLANG_CUDA_COMPILER_PATH=${CLANG_CUDA_COMPILER_PATH:-"/usr/bin/clang"}
+    export TF_CUDA_CLANG=${TF_CUDA_CLANG:-0}
+else
+    echo "CUDA support disabled"
+    cuda_config_opts=""
+    export TF_NEED_CUDA=0
+fi
+
+# set bazel options for c++17 standard if necessary
+cxx_std_opts=""
+if [ "@CMAKE_CXX_STANDARD@" == 17 ]; then
+    echo "Using C++17 standard"
+    cxx_std_opts="--config=c++17_gcc"
+fi
+
+# configure and build
+./configure
+JVM_RAM_RESOURCES=$((@LOCAL_RAM_RESOURCES@ / 4))
+JVM_RAM_RESOURCES=$((${JVM_RAM_RESOURCES} < 1024 ? 1024 : ${JVM_RAM_RESOURCES}))
+bazel --host_jvm_args="-Xmx${JVM_RAM_RESOURCES}m" \
+      build --config=opt \
+            --config=monolithic \
+            --local_ram_resources=@LOCAL_RAM_RESOURCES@ \
+            --local_cpu_resources=@LOCAL_CPU_RESOURCES@ \
+            --discard_analysis_cache \
+            $cxx_std_opts \
+            $cuda_config_opts \
+            tensorflow:libtensorflow_cc.so \
+            tensorflow:install_headers
+bazel shutdown
